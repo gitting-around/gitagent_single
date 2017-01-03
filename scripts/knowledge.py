@@ -4,6 +4,7 @@
 import sys
 from threading import Lock
 import random
+import Queue
 
 class Knowledge0:
 	def __init__(self):
@@ -27,13 +28,19 @@ class Knowledge0:
 		self.collected_reward = 0
 
 		self.old_state = 0
-		
+		self.own_progress = -1
+		self.task_urgency = -1		
+
 		## These vars are manipulated by multiple threads ###
 		self.current_client = []
 		self.service_req = []
 		self.service_resp = []
 		self.service_resp_content = []
 		#####################################################
+
+		self.task_queue = Queue.Queue()
+		self.plan_pending_eval = Queue.Queue()
+		self.current_plan_id = 0
 
 		self.client_index = -1
 		self.old_client_index = -1
@@ -53,11 +60,14 @@ class Knowledge0:
 
 		self.timeouts_xinteract = []
 
-		self.service = []
 		self.task_idx = -1
 
 		self.changed_servs = 1
-		self.iteration = 1 
+
+		self.service = []
+		self.service_id = -1
+		self.iteration = -1 
+		self.difficulty = -1
 
 		self.known_people = []
 

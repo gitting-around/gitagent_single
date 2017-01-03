@@ -3,7 +3,8 @@
 import sys
 import rospy
 import time
-from gitagent.msg import *
+from gitagent_single.msg import *
+import pdb
 
 class PUnit:
 	me = -1
@@ -56,16 +57,24 @@ class PUnit:
 		rospy.loginfo(rospy.get_caller_id() + " Callback-from-plan %s, %s", data.sender, data.content)
 		#If this is a new plan then send to 'brain', else ignore
 		
-		print data.content.split('\n', 1)[0]
+		print data
+
 		if self.new_plan(data.content.split('\n', 1)[0]) and not rospy.is_shutdown():
+		
 			self.publish_brain.publish(data)
 			print 'PUBLISHED new Plan'
+
 		else:
 			print 'NOT a new plan, so IGNORE'
+			print type(data.content.split('\n', 1)[0])
+			print '\n\n'
 
 	def new_plan(self, plan_id):
-		if not self.last_plan == plan_id:
-			self.last_plan = plan_id
+		print self.last_plan
+		print plan_id
+		print '\n\n'
+		if not self.last_plan == int(plan_id):
+			self.last_plan = int(plan_id)
 			return True
 		else:
 			return False
@@ -83,13 +92,13 @@ class PUnit:
 		return new
 
 if __name__ == '__main__':
-
-	stderr_file = '/home/mfi01/.ros/RESULT/error_msg_punit'
+        #pdb.set_trace()
+	stderr_file = '/home/mfi01/catkin_ws/results/error_msg_punit'
 	f = open(stderr_file, 'w+')
 	orig_stderr = sys.stderr
 	sys.stderr = f
 
-	stdout_file = '/home/mfi01/.ros/RESULT/stdout_msg_unit'
+	stdout_file = '/home/mfi01/catkin_ws/results/stdout_msg_unit'
 	s = open(stdout_file, 'w+')
 	orig_stdout = sys.stdout
 	#sys.stdout = s

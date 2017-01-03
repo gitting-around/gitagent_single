@@ -1,0 +1,13 @@
+<launch>
+	<!-- BEGIN ROBOT1-->
+	<group ns="robot1">
+		<include file="$(find gitagent_single)/Launch/agent_0.5_0.7_10.launch"> <arg name="id" value="1"/> </include>
+	</group>
+	<!-- BEGIN ENV-->
+	<group ns="environment">
+	</group>
+	<group ns="auxilliary">
+		<include file="$(find gitagent_single)/Launch/planner.launch"> </include>
+		<!-- <include file="$(find gitagent_single)/Launch/visualiser.launch"> </include> -->
+	</group>
+</launch>

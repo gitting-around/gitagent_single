@@ -4,12 +4,13 @@ import rospy
 import agent0
 import simulation
 import mylogging
-from gitagent.msg import *
-from gitagent.srv import *
+from gitagent_single.msg import *
+from gitagent_single.srv import *
 import traceback
 import time
 from threading import Lock
 import numpy as np
+import pdb
 
 class GitAgent(agent0.Agent0):
 
@@ -20,12 +21,32 @@ class GitAgent(agent0.Agent0):
 		self.simulation.callback_bc = self.simulation.inc_iterationstamps(self.simulation.callback_bc)
 		print 'SIM', self.simulation.callback_bc
 
-		self.register_new_people(data)
+		#self.register_new_people(data)
+		self.process_bc_request(data)
 
-	def register_new_people(self, data):
-		print 'REGISTERING new people'
+	def process_bc_request(self, data):
 
 		self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '][ROSPY] I am: %d, I heard %d\n' % (self.mycore.ID, int(data.sender)))
+		#Register new individual - Note that what comes from msg_PUnit is always new
+		#However, in the case additional planners are added this code must be changed appropriately
+		self.register_sender(data)
+
+		#Process the request based on the performative
+		if data.performative == 'highlevelplan':
+			#Add the plan/task in the request in the plan_eval queue
+			plan = filter(None, data.content.split('\n'))
+			planId = plan.pop(0)
+			plan = filter(None, plan[0].split('$'))
+			plan.pop(0)
+			plan = filter(None, plan[0].split('#'))
+			self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + ']'+str(plan)+'\n\n')
+
+			tasks = self.simulation.string2dict(plan, planId, data.sender)
+			self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] '+str(tasks)+'\n\n')
+			self.myknowledge.plan_pending_eval.put(tasks)
+			self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] new plan into queue\n\n')
+		
+	def register_sender(self, data):
 		guy_id_srv = []
 		if not data.performative == 'highlevelplan':
 			guy_id_srv = [int(data.sender), -1]
@@ -38,59 +59,25 @@ class GitAgent(agent0.Agent0):
 			guy_id_srv.append(exp)
 			self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] ' + str(guy_id_srv) + '\n')
 		else:
+			self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + ']'+str(data)+'\n')
 			guy_id_srv = [int(data.sender), -1]
 			guy_id_srv.append([])
 			exp = []
 			guy_id_srv.append(exp)
 
-			#careful task4me in these trials is an array with one element
-			task4me = self.register_new_plan(data)
-			self.myknowledge.lock.acquire()
-			self.myknowledge.service_req.append(task4me[0])
-			self.myknowledge.current_client.append(int(data.sender))
-			self.myknowledge.service_resp.append(False)
-			self.myknowledge.service_resp_content.append(-1)
-			self.adaptive_state.append(True)
-			self.myknowledge.lock.release()
-
 		self.myknowledge.lock.acquire()
 		self.myknowledge.known_people.append(guy_id_srv)
-		self.myknowledge.lock.release()
-		print 'known people in BRAIN'
-		print self.myknowledge.known_people
-
-		self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] known people ' + str(self.myknowledge.known_people) + '\n')
-		#For each new person, append the values for the experiences. FOLLOWS the INDEXING of known_people
-		self.myknowledge.lock.acquire()
 		self.myknowledge.helping_interactions.append(0)
 		self.myknowledge.total_interactions.append(0)
-		self.myknowledge.lock.release()
-
 		temp_values = []
 		for x in range(0, len(guy_id_srv[2])):
 			temp_values.append([0,0])
-
-		self.myknowledge.lock.acquire()
 		self.myknowledge.capability_expertise.append(temp_values)
 		self.myknowledge.lock.release()
+
+		self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] known people ' + str(self.myknowledge.known_people) + '\n')
+
 		self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) + '] capability_expertise ' + str(self.myknowledge.capability_expertise) + '\n')
-
-	def register_new_plan(self, data):
-		print 'NEW PLAN gotten'
-		self.log.write_log_file(self.log.stdout_callback, '[callback ' + str(self.simulation.callback_bc) +' new plan gotten. Change to adapt for the task in the plan that concerns the agent \n')
-		task4me = []
-		plan = data.content.split('\n')
-
-		plan.pop(0)
-		print plan
-
-		for x in plan:
-			x = x.split('|')
-			if int(x[0]) == self.mycore.ID:
-				print 'found task that concerns me'
-				task4me = [int(s) for s in x[1].split(' ')]
-				print task4me
-		return task4me
 
 	def init_inputs(self, inputs):
 		for x in inputs:
@@ -222,13 +209,13 @@ class GitAgent(agent0.Agent0):
 		
 
 if __name__=='__main__':
-
-	stderr_file = '/home/mfi01/.ros/RESULT/error_brain'
+	#pdb.set_trace()
+	stderr_file = '/home/mfi01/catkin_ws/results/error_brain'
 	f = open(stderr_file, 'w+')
 	orig_stderr = sys.stderr
 	sys.stderr = f
 
-	stdout_file = '/home/mfi01/.ros/RESULT/stdout_brain'
+	stdout_file = '/home/mfi01/catkin_ws/results/stdout_brain'
 	s = open(stdout_file, 'w+')
 	orig_stdout = sys.stdout
 	#sys.stdout = s
@@ -253,6 +240,11 @@ if __name__=='__main__':
 	motors = []
 	#Give a list of function names that represent the capabilities of the agent
 	sim = simulation.Simulation0()
+	
+	agentfile = "conf_"+str(agent_id)
+	#Read agent configuration file
+	agent_conf = sim.read_agent_conf(agentfile)
+	print agent_conf
 	#From the list of services select 30% (this number can be modified) for the agent to be providing - at random
 	#[id time energy reward ...] ... -> dependencies on other services for instance 4 5 2 1
 	#Active_servs format: [[5, 100, 3705, 42], [6, 97, 5736, 19], [9, 96, 9156, 4]]
@@ -262,11 +254,12 @@ if __name__=='__main__':
         battery = 10000
 	################################################################################################
 	
-	agent = GitAgent(agent_id, inputs, outputs, active_servs, ['njohuri rreth pilafit'], ['shqip'], ['FIPA-ish'], [theta, delta], sim, 2, 1, depends, battery, sensors, actuators, motors)
+	agent = GitAgent(agent_id, agent_conf, active_servs, [theta, delta], sim, 2, 1, depends, battery, sensors, actuators, motors)
 	agent.log.write_log_file(agent.log.stdout_log, 'active_serve ' + str(active_servs) + '\n')
 
 	try:
 		agent.fsm()
+		#time.sleep(200)
 	except rospy.ROSInterruptException:
 		traceback.print_exc()
 		raise

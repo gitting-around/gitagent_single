@@ -4,6 +4,8 @@
 import sys
 import random
 import math
+import time
+import pdb
 
 class Simulation0:
 	def __init__(self):
@@ -20,12 +22,100 @@ class Simulation0:
 		self.dead = 0
 		self.hell = 0
 
+		##Default value for delay when request is issued
+		self.additional_delay = [0.05, 0.1, 0.2]
+
+		#Time taken by tasks of different difficulties, easy, medium, hard
+		self.delay = [0.1, 0.5, 1.0]
+
+		self.dep_prob = 0.2
+
+		##Values to be measured
+		#First element contains requests produced by easy tasks, second by medium, third by difficult tasks
+		self.requests = [0, 0, 0]
+
+		#Plans received: easy, medium, difficult
+		self.no_plans = [0, 0, 0]
+
+		#Tasks executed: easy, medium, difficult
+		self.no_tasks = [0, 0, 0]
+
+		#Contains the time consumed by the fuzzy algorithm on each run
+		self.fuzzy_time = []
+
+		#Tasks executed: easy, medium, difficult
+		self.exec_times = [0, 0, 0]
+
+		#An error is considered the one in which the system returns no request when there is a required res/abil missing
+		self.required_missing = 0
+		self.required_missing_noreq = 0
+
 		#self.stdout_log = 'RESULT/pop_size.'+str(popSize) +'/prova.'+str(provaNr)+'/stdout_' + str(ID) + '_' + str(delta) +'_'+ str(depend_nr)
 		#self.stdout_callback = 'RESULT/pop_size.'+str(popSize) +'/prova.'+str(provaNr)+'/stdout_callback' + str(ID) + '_' + str(delta) +'_'+ str(depend_nr)
 		#self.stdout_handle = 'RESULT/pop_size.'+str(popSize) +'/prova.'+str(provaNr)+'/stdout_handle' + str(ID) + '_' + str(delta) +'_'+ str(depend_nr)
 
+	def detect_difficulty(self, service):
+		if len(service['abilities']) == 1:
+			return 0
+		elif len(service['abilities']) == 2:
+			return 1
+		elif len(service['abilities']) == 3:
+			return 2
+		else:
+			return 3
+
+	def sim_dependencies(self, service):
+		#Each ability and resource adds to the probability of a dependency being raised -- considering abilities as required, and resources as optional for the sake of current implementation simplicity
+		required = 0
+		optional = 0
+		req_missing = False
+
+		for x in service['abilities']:
+			if random.random() > self.dep_prob:
+				required = required + 1
+
+		for x in service['resources']:
+			if random.random() > self.dep_prob:
+				optional = optional + 1
+			
+		if required < len(service['abilities']):
+			dependency_state = 0.3
+			self.required_missing = self.required_missing + 1
+			req_missing = True
+		elif required == len(service['abilities']) and optional < len(service['resources']):
+			dependency_state = 0.6
+		elif required == len(service['abilities']) and optional == len(service['resources']):
+			dependency_state = 1.0
+		else:
+			dependency_state = -10000
+
+		return (dependency_state, req_missing)
+
+	def read_agent_conf(self, filename):
+		
+		with open('/home/mfi01/catkin_ws/src/gitagent_single/scripts/'+filename) as f:
+			lines = f.read().splitlines()
+
+		battery = int(lines[0])
+		vel = float(lines[1])
+		sens = [x.split(',') for x in lines[2].split('|')]
+		act = [x for x in lines[3].split(',')]
+		mot = [x for x in lines[4].split(',')]
+		sloc = [x for x in lines[5].split(',')]
+		abil = [x for x in lines[6].split(',')]
+		res = [x for x in lines[7].split(',')]
+		serve = [x for x in lines[8].split(',')]
+		knowl = [x for x in lines[9].split(',')]
+		lang = [x for x in lines[10].split(',')]
+		prots = [x for x in lines[11].split(',')]
+
+		return {'battery':battery, 'velocity':vel, 'sensors':sens, 'actuators':act, 'motors':mot, 'startLocation':sloc, 'abilities':abil, 'resources':res, 'services':serve, 'knowledge':knowl, 'languages':lang, 'protocols':prots}
+
 	def execute_task(self, task):
 		pass
+
+	def insert_delay(self):
+		time.sleep(self.delay)
 
 	#moves randomly
 	def move(self, xypos):
@@ -43,12 +133,60 @@ class Simulation0:
 		iteration_stamp = iteration_stamp + 1
 		return iteration_stamp
 
+	def get_tasks(self, filename):
+		## Task Format ###########################################
+		# id iter energy reward name startLocation endLocation noAgents equipment[[sensors],[actuators], [motors]] abilities resources estimated_time
+		#pdb.set_trace()
+		tasks = []
+		with open('/home/mfi01/catkin_ws/src/gitagent_single/scripts/service_spec/'+filename) as f:
+			lines = f.read().splitlines()
+
+		for line in lines:
+			line = line.split(' ')
+			tID = int(line[0])
+			iterations = int(line[1])
+			energy = int(line[2])
+			reward = int(line[3])
+			tName = line[4]
+			startLoc = [x for x in line[5].split(',')]
+			endLoc = [x for x in line[6].split(',')]
+			noAgents = int(line[7])
+			equipment = [x.split(',') for x in line[8].split('|')]
+			abilities = [x for x in line[9].split(',')]
+			res = [x for x in line[10].split(',')]
+			estim_time = float(line[11])
+			tasks.append({'id':tID, 'iterations':iterations, 'energy':energy, 'reward':reward, 'name':tName, 'startLoc':startLoc, 'endLoc':endLoc, 'noAgents':noAgents, 'equipment':equipment, 'abilities':abilities, 'resources':res, 'estim_time':estim_time})
+			print line
+		
+		return tasks, lines
+
+	def string2dict(self, lines, planId, senderId):
+		tasks = []
+		for line in lines:
+			line = line.split(' ')
+			tID = int(line[0])
+			iterations = int(line[1])
+			energy = int(line[2])
+			reward = int(line[3])
+			tName = line[4]
+			startLoc = [x for x in line[5].split(',')]
+			endLoc = [x for x in line[6].split(',')]
+			noAgents = int(line[7])
+			equipment = [x.split(',') for x in line[8].split('|')]
+			abilities = [x for x in line[9].split(',')]
+			res = [x for x in line[10].split(',')]
+			estim_time = float(line[11])
+			tasks.append({'senderID':senderId, 'planID':planId,'id':tID, 'iterations':iterations, 'energy':energy, 'reward':reward, 'name':tName, 'startLoc':startLoc, 'endLoc':endLoc, 'noAgents':noAgents, 'equipment':equipment, 'abilities':abilities, 'resources':res, 'estim_time':estim_time})
+			print line
+		
+		return tasks
+
 	#trick to emulate the selection of a couple of services the agent can provide
 	def select_services(self, agent_id, depend_nr): 
 		# Anatomy of service
 		# [id, iterations, energy, reward, [mandatory resources], [optional resources], permission, urgency, estimated_time, [known dependencies (no array for now, just one)]]
 		try: 	#try to do it with relative paths
-			filename = '/home/mfi01/catkin_ws/src/gitagent/scripts/service_spec/services_list_' + str(depend_nr)
+			filename = '/home/mfi01/catkin_ws/src/gitagent_single/scripts/service_spec/services_list_' + str(depend_nr)
 			service_file = open(filename, 'r')
 
 			active_servs = []

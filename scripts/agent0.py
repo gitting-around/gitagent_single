@@ -8,50 +8,64 @@ import core_aboutme
 import knowledge
 import simulation
 import rospy
-from gitagent.msg import *
-from gitagent.srv import *
+from gitagent_single.msg import *
+from gitagent_single.srv import *
 from threading import Lock
 import random
+import timeit
 
 class Agent0:
-	def __init__(self, ID, inputs, outputs, services, init_knowledge, languages, protocols, willingness, simulation, popSize, provaNr, depend_nr, battery, sensors, actuators, motors):
+	def __init__(self, ID, conf, services, willingness, simulation, popSize, provaNr, depend_nr, battery, sensors, actuators, motors):
 
 		#logging class
 		self.log = mylogging.Logging(popSize, provaNr, ID, willingness[1], depend_nr)
 
 		#They will contain arrays of topic's names ###
-		self.inputs = inputs
+		self.inputs = conf['sensors']
+		print self.inputs
 		self.publish_bcast = []
-		self.outputs = outputs
+		self.outputs = conf['actuators']
+		self.motors = conf['motors']
+		print self.outputs
 		self.init_inputs(self.inputs)
 		self.init_outputs(self.outputs)
 		self.init_serve(ID)
 		##############################################
 
-		#Enumerated lists for each ###
+		#Enumerated lists for each #########
 		self.services = services
-		self.languages = languages
-		self.protocols = protocols
-		#############################
+		self.languages = conf['languages']
+		self.protocols = conf['protocols']
+		self.abilities = conf['abilities']
+		self.resources = conf['resources']
+		####################################
 
 		#Variables manipulated by multiple threads ###
 		self.adaptive_state = []
 		##############################################
 
-		#Contains info specific to the internal state of the agent such as: state, health attributes etc.
-		self.mycore = core_aboutme.Core(willingness, ID, battery, sensors, actuators, motors)
+		## Contains info specific to the internal state of the agent such as: state, health attributes etc.
+		self.mycore = core_aboutme.Core(willingness, ID, conf['battery'], sensors, actuators, motors)
 		self.log.write_log_file(self.log.stdout_log, 'init gitagent ' + str(self.mycore.sensmot) + '\n')
-		#Contains mixed info #########################
+		## Contains mixed info ############################################################################
 		self.myknowledge = knowledge.Knowledge0()
 
 		#use simulation functions
 		self.simulation = simulation
 
+		print self.inputs, self.outputs, self.motors, self.languages, self.protocols, conf['battery']
+
+		#########this is a publisher which publishes to pseudo-planner --- must be integrated like the others --- TEMPORARY code
+		self.pub_plan_status = rospy.Publisher('/environment/plan', Protocol_Msg, queue_size=10)
+
+		###############################################################################
+		#time.sleep(200)
+
 	def fsm(self):
 		while True:
-			self.change_selfstate()
+			self.change_selfstate_v2()
 			#normally you might want to estimate a value that corresponds to the cost of each cycle
-			self.mycore.battery_change(-1)
+		#self.mycore.battery_change(-1)
 			self.mycore.sensory_motor_state_mockup()
 			self.mycore.check_health()
 			#funksioni meposhte mund te ekzekutohet ne paralel --> per tu zhvilluar me tej ne nje moment te dyte
@@ -75,31 +89,71 @@ class Agent0:
 		elif self.mycore.state == 1:
 			self.interact()
 		elif self.mycore.state == 2:
-			self.execute()
+			self.execute_v2()
 		elif self.mycore.state == 3:
 			self.regenerate()
 		elif self.mycore.state == 4:
 			self.dead()
 
-		#time.sleep(1)	
+	def change_selfstate_v2(self):
+		if not self.myknowledge.plan_pending_eval.empty():
+			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] adaptive state: True\n')
 
-	def change_selfstate(self):
-		print 'ADAPTIVE STATE: ', self.adaptive_state
-		self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] adaptive state: ' + str(self.adaptive_state) + '\n')
-
-		self.myknowledge.lock.acquire()
-		if True in self.adaptive_state:
-			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] current client_index: ' + str(self.myknowledge.client_index) + '\n')
-			self.myknowledge.old_client_index = self.myknowledge.client_index
-			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] ' + str(self.adaptive_state) + ' ' + str(self.myknowledge.current_client) + '\n')
-			self.myknowledge.client_index = self.adaptive_state.index(True)
-
-			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] ' + str(self.adaptive_state) + ' ' + str(self.myknowledge.current_client) + '\n')
+			self.myknowledge.lock.acquire()
 			self.myknowledge.old_state = self.mycore.state
 			self.mycore.state = 1
-			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] ' + str(self.adaptive_state) + ' ' + str(self.myknowledge.current_client) + '\n')
-			self.adaptive_state[self.adaptive_state.index(True)] = False
-		self.myknowledge.lock.release()
+			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] ' + str(self.myknowledge.old_state) + str(self.mycore.state) + '\n')
+			self.myknowledge.lock.release()
+		else:
+			self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] adaptive state: False\n')
+
+	def eval_temp_2(self):
+
+		self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + ']\n')
+
+		rate = -1000
+		rate_depend = -1000
+
+		if self.myknowledge.attempted_jobs == 0:
+			rate = 0.0
+		else:
+			rate = 1.0 * self.myknowledge.completed_jobs / self.myknowledge.attempted_jobs
+
+		if self.myknowledge.attempted_jobs_depend == 0:
+			rate_depend = 0.0
+		else:
+			rate_depend = 1.0 * self.myknowledge.completed_jobs_depend / self.myknowledge.attempted_jobs_depend
+
+		## Here put the new fuzzy evaluation function
+		accept = True
+
+		self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] accept ' + str(accept) + '\n')
+
+		if accept:
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] adapted\n')
+			## Take plan-request out of queue, and put the tasks into the queue for tasks the agent has committed to
+			plan = self.myknowledge.plan_pending_eval.get()
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] '+str(plan)+'\n\n')
+		
+			for x in plan:
+				self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] '+str(x)+'\n')
+				self.myknowledge.task_queue.put(x)
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] put tasks in queue\n')			
+
+			self.myknowledge.count_posReq = self.myknowledge.count_posReq + 1
+
+			self.myknowledge.attempted_jobs = self.myknowledge.attempted_jobs + 1
+
+			self.mycore.state = 2
+			#self.myknowledge.service = self.services[self.myknowledge.task_idx]
+
+			self.myknowledge.helping = True
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] helping: ' + str(self.myknowledge.helping) + '\n')
+
+		else:
+			print 'keep at what you\'re doing'
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] do not adapt\n')
+			self.mycore.state = self.myknowledge.old_state	
 
 	def idle(self):
 		print 'im in idle'
@@ -112,185 +166,118 @@ class Agent0:
 		print 'im in interact'
 		self.simulation.interact = self.simulation.inc_iterationstamps(self.simulation.interact)
 
-		self.eval_temp()
+		self.eval_temp_2()
 
 		self.evaluate_my_state()
 		self.evaluate_agent()
 		self.evaluate_request()
 		self.commit2agent()
 
-	def execute(self):
-		print 'im in execute'
+	def send_status(self, plan_id):
+		if not self.myknowledge.current_plan_id == plan_id and self.myknowledge.current_plan_id > 0:
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] planID: %d has finished, send \'1\'\n' % self.myknowledge.current_plan_id)
+			message = Protocol_Msg()
+			message.performative = 'plan_status'
+			message.sender = str(self.mycore.ID)
+			message.rank = 10
+			message.receiver = 'all'
+			message.language = 'shqip'
+			message.ontology = 'shenanigans'
+			message.urgency = 'INFO'
+			message.content = str(self.myknowledge.current_plan_id)+'|1'
+			message.timestamp = time.strftime('%X', time.gmtime())
+			if not rospy.is_shutdown():
+				self.pub_plan_status.publish(message)
+				self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] message ' + str(message) + ' published \n')
+
+		self.myknowledge.current_plan_id = plan_id
+		self.log.write_log_file(self.log.stdout_log, '[current plan] planID: %d\n' % plan_id)
+
+	def execute_v2(self):
 		self.simulation.execute = self.simulation.inc_iterationstamps(self.simulation.execute)
 
-		self.plan2goal()
-		self.execute_step(self.myknowledge.service, self.myknowledge.iteration)
-	
-	def execute_step(self, service, iteration):
+		self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.service)+'\n')
+		self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.service_id)+'\n')
+		self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.iteration)+'\n')
 
-		timeout = time.time() + 10
-		depend = self.resolve_dependencies(service)
-		print 'depend: ', depend
-
-		if iteration <= service[1] and not depend:
-			print 'iteration: ', iteration
-			self.myknowledge.iteration = self.myknowledge.iteration + 1
-			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Doing task %d, iteration: %d\n' % (service[0], iteration))
-
-			if self.myknowledge.iteration > service[1]:
-				self.mycore.state = 0
+		if self.myknowledge.service_id == -1 and self.myknowledge.iteration == -1:
+			if not self.myknowledge.task_queue.empty():
+				self.myknowledge.service = self.myknowledge.task_queue.get()
+				self.myknowledge.service_id = int(self.myknowledge.service['id'])
 				self.myknowledge.iteration = 1
 
-				self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] client_index %d, helping %s\n' % (self.myknowledge.client_index, self.myknowledge.helping))
-				print 'helping: ', self.myknowledge.helping
-				if self.myknowledge.helping:
-					self.myknowledge.service_req[self.myknowledge.client_index] = -1
-					if random.random() > 0: #it will always succeed
-						self.myknowledge.lock.acquire()
-						self.myknowledge.service_resp_content[self.myknowledge.client_index] = 1
-						self.myknowledge.lock.release()
-						self.myknowledge.completed_jobs = self.myknowledge.completed_jobs + 1
-						self.myknowledge.collected_reward = self.myknowledge.collected_reward + service[3]
+				#self.send_status(int(self.myknowledge.service['planID']))
 
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Helping, Task %d, done, wandering again\n' % service[0])
-
-					else:
-						self.myknowledge.lock.acquire()
-						self.myknowledge.service_resp_content[self.myknowledge.client_index] = 0
-						self.myknowledge.lock.release()
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Helping, Task %d, failed, wandering again\n' % service[0])
-
-					self.myknowledge.lock.acquire()
-					self.myknowledge.service_resp[self.myknowledge.client_index] = True
-					self.myknowledge.lock.release()
-					self.myknowledge.helping = False
-					self.myknowledge.client_index = -1
-				else:
-					self.myknowledge.completed_jobs = self.myknowledge.completed_jobs + 1
-					self.myknowledge.collected_reward = self.myknowledge.collected_reward + service[3]
-
-					self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Task %d, done, wandering again\n' % service[0])
-			print 'compl jobs: ', self.myknowledge.completed_jobs
-		elif iteration <= service[1] and depend:
-			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Doing task %d, iteration. Depend is true\n' % service[0])
-
-			stringing = str(service[4])
-			if not len(self.myknowledge.known_people) == 0:
-				anyone = False
-				anyone_id = []
-				anyone_id_idx = []
-				subset_known = []
-				anyone_index = -1
-				jj = -1
-
-				for x in self.myknowledge.known_people:
-					if service[4] in x[2]:
-						subset_known.append(x)
-						anyone_id.append(x[0])
-						anyone = True
-						anyone_id_idx.append(self.myknowledge.known_people.index(x))
-
-				self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] anyone_id: ' + str(anyone_id) + '\n' + '[run_step ' + str(self.simulation.execute) + '] anyone_id_idx: ' + str(anyone_id_idx) + '\n' + '[run_step ' + str(self.simulation.execute) + '] subset: ' + str(subset_known) + '\n')
-
-				if anyone:
-					## function to choose the server -- right now random from the list above
-					if self.simulation.execute < self.myknowledge.steps_b4_equilibrium:
-						jj = random.randint(0, len(anyone_id) - 1)
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] jj at random: %d\n' % jj)
-					else:
-						if random.random() < 0.8:
-							jj = subset_known.index(max(subset_known, key=lambda x: x[1]))
-							self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] jj using lambda function: %d\n' % jj)
-						else:
-							jj = random.randint(0, len(anyone_id) - 1)
-							self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] jj at random after equilibrium: %d\n' % jj)
-					anyone_index = anyone_id_idx[jj]
-					server = anyone_id[jj]
-
-					self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] anyone_id: ' + str(anyone_id[jj]) + '\n' + '[run_step ' + str(self.simulation.execute) + '] anyone_index: ' + str(anyone_index) + '\n' + '[run_step ' + str(self.simulation.execute) + '] server: ' + str(server) + '\n')
-
-					server_resp = -1000
-					print 'i am %d, asking for %d' %(self.mycore.ID, int(server))
-					try:
-						server_resp = int(self.call_serve(server, self.mycore.ID, stringing, anyone_index))
-					except:
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] it went to heell ' + str(server_resp) + '\n')
-						self.simulation.hell = self.simulation.hell + 1
-						server_resp = -1
-						pass
-
-					print 'checking after service return: ' + str(server_resp)
-					self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] checking after service return: ' + str(server_resp) + '\n')
-					self.mycore.state = 0
-					self.myknowledge.iteration = 1
-
-					if server == self.myknowledge.client_index:
-						self.myknowledge.count_loops = self.myknowledge.count_loops + 1
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] counting loops + 1' + '\n')
-					#here is where you update the values for the agent's expertise and perceived willingness to help
-					if server_resp == 1:
-						self.myknowledge.completed_jobs = self.myknowledge.completed_jobs + 1
-						self.myknowledge.completed_jobs_depend = self.myknowledge.completed_jobs_depend + 1
-						self.myknowledge.collected_reward = self.myknowledge.collected_reward + service[3]
-
-						print 'Task %d, done, wandering again with help' % service[0]
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Task %d, done, wandering again\n' % service[0])
-					else:
-						prob = random.random()
-						self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] prob %d: \n' % prob)
-						if prob <= 0.3:
-							self.myknowledge.completed_jobs = self.myknowledge.completed_jobs + 1
-							self.myknowledge.completed_jobs_depend = self.myknowledge.completed_jobs_depend + 1
-							self.myknowledge.collected_reward = self.myknowledge.collected_reward + service[3]
-							self.myknowledge.depend_myself = self.myknowledge.depend_myself + 1
-
-							self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Task %d, done by myslef, after failed help request\n' % service[0])
-							print 'task done by self, after failed request'
-							server_resp = 1
-						else:
-							self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Task %d, failed, both help request and by myself\n' % service[0])
-							print 'failed, both myself and with help'
-
-					if self.myknowledge.helping:
-						self.myknowledge.lock.acquire()
-						self.myknowledge.service_req[self.myknowledge.client_index] = -1
-						self.myknowledge.service_resp_content[self.myknowledge.client_index] = server_resp
-						self.myknowledge.service_resp[self.myknowledge.client_index] = True
-						self.myknowledge.lock.release()
-						self.myknowledge.helping = False
-						self.myknowledge.client_index = -1
-				else:
-					server_resp = 0
-
-					self.myknowledge.COUNT_noones = self.myknowledge.COUNT_noones + 1
-					self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] no one to ask that has this capability\n' + '[run_step ' + str(self.simulation.execute) + '] Doing task %d\n' % service[0])
-					print 'no one to ask for this'
-
-					self.mycore.state = 0
-					if self.myknowledge.helping:
-						self.myknowledge.lock.acquire()
-						self.myknowledge.service_req[self.myknowledge.client_index] = -1
-						self.myknowledge.service_resp_content[self.myknowledge.client_index] = server_resp
-						self.myknowledge.service_resp[self.myknowledge.client_index] = True
-						self.myknowledge.lock.release()
-						self.myknowledge.helping = False
-						self.myknowledge.client_index = -1
-				#self.service_req = -1 --- careful with this one
+				## Detect task difficulty - from nr of required abilities
+				self.myknowledge.difficulty = self.simulation.detect_difficulty(self.myknowledge.service)
+				
+				self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.service)+'\n')
+				self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.service_id)+'\n')
+				self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.myknowledge.iteration)+'\n')
+				self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + '] Difficulty: '+str(self.myknowledge.difficulty)+'\n')
+				self.execute_step_v3()
 			else:
-				self.myknowledge.COUNT_noones = self.myknowledge.COUNT_noones + 1
-				self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] no one to ask\n' + '[run_step ' + str(self.simulation.execute) + '] Doing task %d\n' % service[0])
-				print 'no one to ask'
-				server_resp = 0
-				if self.myknowledge.helping:
-					self.myknowledge.lock.acquire()
-					self.myknowledge.service_req[self.myknowledge.client_index] = -1
-					self.myknowledge.service_resp_content[self.myknowledge.client_index] = server_resp
-					self.myknowledge.service_resp[self.myknowledge.client_index] = True
-					self.myknowledge.lock.release()
-					self.myknowledge.helping = False
-					self.myknowledge.client_index = -1
 				self.mycore.state = 0
+				self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']'+str(self.mycore.state)+'\n')
+		else:
+			self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + '] continue working\n')
+			self.execute_step_v3()		
 
+	def execute_step_v2(self):
+		dependencies = self.simulation.sim_dependencies(self.myknowledge.service)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] dependencies: %f \n' % dependencies)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] fuzzy inputs: %f, health: %f\n' % int(dependencies, sum([self.mycore.sensmot, self.mycore.battery])))
+
+		start_time = timeit.default_timer()
+		depend_fuzzy = self.mycore.willing2ask([sum([self.mycore.sensmot, self.mycore.battery]), 0.7, dependencies, 0.5])
+		self.simulation.fuzzy_time.append(timeit.default_timer() - start_time)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] depend_fuzzy: %f \n' % int(depend_fuzzy))
+
+		if self.myknowledge.iteration < int(self.myknowledge.service['iterations']):
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Running task: %d, iteration: %d\n' % (self.myknowledge.service_id, self.myknowledge.iteration))
+			self.myknowledge.iteration = self.myknowledge.iteration + 1
+		else:
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Task: %d done\n' % self.myknowledge.service_id)
+			self.myknowledge.service_id = -1
+			self.myknowledge.iteration = -1
+
+	##Instead of iteration, pause for some prespecified time
+	def execute_step_v3(self):
+		dependencies, req_missing = self.simulation.sim_dependencies(self.myknowledge.service)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] dependencies: %f \n' % dependencies)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] fuzzy inputs: %f, health: %f\n' % (dependencies, sum([self.mycore.sensmot, self.mycore.battery])))
+
+		start_time = timeit.default_timer()
+		depend_fuzzy = self.mycore.willing2ask([sum([self.mycore.sensmot, self.mycore.battery]), 0.7, dependencies, 0.5])
+		self.simulation.fuzzy_time.append(timeit.default_timer() - start_time)
+
+		self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] depend_fuzzy: ' + str(depend_fuzzy) + '\n')
+
+		if req_missing and not depend_fuzzy:
+			self.simulation.required_missing_noreq = self.simulation.required_missing_noreq + 1
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] There should have been a request: ' + str(self.simulation.required_missing_noreq/float(self.simulation.required_missing)) + '\n')
+
+		if depend_fuzzy:
+			self.simulation.requests[self.myknowledge.difficulty] = self.simulation.requests[self.myknowledge.difficulty] + 1
+			exec_time = self.simulation.additional_delay[self.myknowledge.difficulty] + self.simulation.delay[self.myknowledge.difficulty]
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] difficulty: %f, delay: %f, addi: %f\n' % (self.myknowledge.difficulty, self.simulation.delay[self.myknowledge.difficulty], self.simulation.additional_delay[self.myknowledge.difficulty] ))
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Ask for help\n ...Wait for %f' % exec_time)
+			self.simulation.exec_times[self.myknowledge.difficulty] = self.simulation.exec_times[self.myknowledge.difficulty] + exec_time
+			time.sleep(exec_time)
+		else:
+			exec_time = self.simulation.delay[self.myknowledge.difficulty]
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] Do it yourself\n ...Wait for %f' % exec_time)
+			self.simulation.exec_times[self.myknowledge.difficulty] = self.simulation.exec_times[self.myknowledge.difficulty] + exec_time
+
+			self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(self.simulation.execute) + '] difficulty: %f, delay: %f, addi: %f\n' % (self.myknowledge.difficulty, self.simulation.delay[self.myknowledge.difficulty], self.simulation.additional_delay[self.myknowledge.difficulty] ))
+			time.sleep(exec_time)
+			self.myknowledge.service_id = -1
+			self.myknowledge.iteration = -1
 
 	def regenerate(self):
 		print 'im in regenerate'
@@ -318,24 +305,32 @@ class Agent0:
 
 	def generate_goal(self):
 		if random.random() > 0.7:
-			self.myknowledge.task_idx = random.randint(1, len(self.services)) - 1 #randint(a,b) kthen int ne [a,b]
-			self.myknowledge.service = self.services[self.myknowledge.task_idx]
+			senderId = -1
+			planId = -random.randint(1,100)
+			tID = random.randint(1,100)
+			iterations = random.randint(1,100)
+			energy = random.randint(1,100)
+			reward = random.randint(1,100)
+			tName = 'some task'
+			startLoc = [2,3]
+			endLoc = [5,6]
+			noAgents = random.randint(1,100)
+			equipment = [['pip'],['pop'],['pup']]
+			abilities = ['halloumi']
+			res = ['mozarella']
+			estim_time = random.random()*random.randint(1,100)
 
-			self.myknowledge.attempted_jobs = self.myknowledge.attempted_jobs + 1
+			tasks = [{'senderID':senderId, 'planID':planId,'id':tID, 'iterations':iterations, 'energy':energy, 'reward':reward, 'name':tName, 'startLoc':startLoc, 'endLoc':endLoc, 'noAgents':noAgents, 'equipment':equipment, 'abilities':abilities, 'resources':res, 'estim_time':estim_time}]
 
-			print "task_idx %d: " % self.myknowledge.task_idx
-			print "service selected ", self.myknowledge.service
-			print "all services ", self.services
+			self.log.write_log_file(self.log.stdout_log, '[wander ' + str(self.simulation.idle) + '] Chosen service: ' + str(tasks) + '\n')
 
-			if len(self.myknowledge.service) > 4:
-				self.myknowledge.attempted_jobs_depend = self.myknowledge.attempted_jobs_depend + 1
-
-			self.log.write_log_file(self.log.stdout_log, '[wander ' + str(self.simulation.idle) + '] Chosen service: ' + str(self.myknowledge.service) + '\n')
+			for x in tasks:
+				self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] '+str(x)+'\n')
+				self.myknowledge.task_queue.put(x)
 
 			self.mycore.state = 2
 		else:
 			self.log.write_log_file(self.log.stdout_log, '[wander ' + str(self.simulation.idle) + '] do nothing - zot jepi atij qe rri kot :DD\n')
-			print "some crap"
 
 	def plan2goal(self):
 		pass
@@ -382,6 +377,9 @@ class Agent0:
 		else:
 			return False
 
+	def eval_plan(self):
+		pass
+
 	def eval_temp(self):
 		for x in self.services:
 			if x[0] == self.myknowledge.service_req[self.myknowledge.client_index]:
@@ -415,6 +413,10 @@ class Agent0:
 		self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] accept ' + str(accept) + '\n')
 
 		if accept:
+			############################ playing with 'queues' - THIS PART IS NOT THREAD-SAFE, NOR FINAL, nor does it remove anything from the .._eval list ###########################
+			self.myknowledge.task_queue = self.myknowledge.task_pending_eval
+			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] '+str(self.myknowledge.task_queue)+'\n')
+			########################################################################################################################
 			self.myknowledge.count_posReq = self.myknowledge.count_posReq + 1
 			self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] adapted\n')
 
