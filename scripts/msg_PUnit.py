@@ -25,6 +25,8 @@ class PUnit:
 
         self.filters = []
 
+        self.close = False
+
         # ROS related directives #######################################################################
         self.publish_brain = rospy.Publisher('bcasts_brain', Protocol_Msg, queue_size=200)
         self.publish_env_msg = rospy.Publisher('/environment/msg_topic', Protocol_Msg, queue_size=200)
@@ -37,6 +39,11 @@ class PUnit:
     def callback_brain(self, data):
         rospy.loginfo(rospy.get_caller_id() + " Callback-from-brain %s, %s", data.sender, data.content)
         print data.content + '__' + str(self.me)
+
+        if data.content == "DIE":
+            print 'brain out. close'
+            self.close = True
+            return
 
         if not rospy.is_shutdown():
             self.publish_env_msg.publish(data)
@@ -108,7 +115,8 @@ if __name__ == '__main__':
 
     try:
         punit = PUnit()
-        rospy.spin()
+        while not punit.close:
+            pass
     finally:
         sys.stderr = orig_stderr
         f.close()

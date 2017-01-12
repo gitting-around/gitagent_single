@@ -32,6 +32,7 @@ class Core:
 
         # agent name (unique -- it has to uniquely point to some agent)
         self.ID = ID
+        self.self_esteem = 1
 
         # Battery levels
         self.battery = battery
@@ -59,32 +60,38 @@ class Core:
                   best_candidate):
 
         self.ask = False
+        theta = -1.0
 
         if health < self.LOW:
             self.factor_track[0] += 1
-            return True
+            theta = 1.0
         else:
             if abilities < self.LOW:
+                theta = 1.0
                 self.factor_track[1] += 1
-                return True
             else:
                 if resources < self.LOW:
+                    theta = 1.0
                     self.factor_track[2] += 1
-                    return True
                 else:
                     if self_esteem < self.HIGH:
                         if task_urgency > self.LOW or task_importance > self.LOW:
+                            theta = max([task_urgency, task_importance])
                             self.factor_track[3] += 1
-                            return True
                         else:
                             if culture > self.LOW and best_candidate > self.LOW:
+                                theta = max([culture, best_candidate])
                                 self.factor_track[4] += 1
-                                return True
                     else:
                         if culture > self.HIGH and best_candidate > self.HIGH:
                             if task_urgency > self.LOW or task_importance > self.LOW:
+                                theta = max([task_urgency, task_importance])
                                 self.factor_track[5] += 1
-                                return True
+
+        if random.random() <= theta:
+            return True, theta
+        else:
+            return False, theta
 
     # Function will return True if decided to give help, or False otherwise
     def give_help(self):
@@ -122,6 +129,8 @@ class Core:
         if tipmsg == 'position':
             for x in raw_content:
                 content = content + str(x) + '|'
+        elif tipmsg == 'DIE':
+            content = 'DIE'
         else:
             for x in raw_content:
                 content = content + str(x[0]) + '|'

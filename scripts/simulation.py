@@ -41,6 +41,12 @@ class Simulation0:
         # Tasks executed: easy, medium, difficult
         self.no_tasks = [0, 0, 0]
 
+        self.no_tasks_attempted = [0, 0, 0]
+        self.no_tasks_completed = [0, 0, 0]
+
+        self.no_tasks_depend_attempted = [0, 0, 0]
+        self.no_tasks_depend_completed = [0, 0, 0]
+
         # Contains the time consumed by the fuzzy algorithm on each run
         self.fuzzy_time = []
 
@@ -50,6 +56,21 @@ class Simulation0:
         # An error is considered the one in which the system returns no request when there is a required res/abil missing
         self.required_missing = 0
         self.required_missing_noreq = 0
+
+        #Stopping criterion - count how many jobs the agent is doing that came from the planner, when 1500 is reached, simulation can end
+        self.STOP = 1500
+        self.stopINC = 0
+
+        # Values to record
+        self.esteem = []
+        self.tu = []
+        self.ti = []
+        self.culture = []
+        self.candidate = []
+        self.deps = []
+        self.theta = []
+        self.health = []
+        self.theta_bool = []
 
     # self.stdout_log = 'RESULT/pop_size.'+str(popSize) +'/prova.'+str(provaNr)+'/stdout_' + str(ID) + '_' + str(delta) +'_'+ str(depend_nr)
     # self.stdout_callback = 'RESULT/pop_size.'+str(popSize) +'/prova.'+str(provaNr)+'/stdout_callback' + str(ID) + '_' + str(delta) +'_'+ str(depend_nr)
@@ -99,6 +120,9 @@ class Simulation0:
         required = 0
         optional = 0
         req_missing = False
+        task_importance = -1
+        task_urgency = -1
+        culture = -1
 
         for x in service['abilities']:
             if random.random() > self.dep_prob:
@@ -120,7 +144,12 @@ class Simulation0:
         else:
             dependency_res = 1.0
 
-        return dependency_abil, dependency_res, req_missing
+        task_importance = random.random()
+        task_urgency = random.random()
+        culture = random.random()
+        best_candidate = random.random()
+
+        return dependency_abil, dependency_res, req_missing, task_importance, task_urgency, culture, best_candidate
 
     def read_agent_conf(self, filename):
 

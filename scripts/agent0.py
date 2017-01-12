@@ -68,7 +68,16 @@ class Agent0:
 
     def fsm(self):
         while not rospy.is_shutdown():
-            # Agent stopping function
+
+            # Simulation stopping criterion
+            if self.simulation.stopINC > self.simulation.STOP:
+                self.log.write_log_file(self.log.stdout_log,
+                                    '[fsm ' + str(self.simulation.fsm) + '] Simulation finished. Value of tasks from planner done: %d\n'
+                                    % self.simulation.stopINC)
+                # Send kill signal to msgPUnit
+                self.publish_bcast[0].publish(self.mycore.create_message('DIE', 'DIE'))
+                return
+
             self.change_selfstate_v2()
             # normally you might want to estimate a value that corresponds to the cost of each cycle
             # self.mycore.battery_change(-1)
@@ -95,7 +104,6 @@ class Agent0:
             self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.fsm) + '] current state: quitting - '
                                                                                               'timer reached')
             return
-
 
     def fsm_step(self):
         self.simulation.fsm = self.simulation.inc_iterationstamps(self.simulation.fsm)
@@ -131,9 +139,6 @@ class Agent0:
 
         self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + ']\n')
 
-        rate = -1000
-        rate_depend = -1000
-
         if self.myknowledge.attempted_jobs == 0:
             rate = 0.0
         else:
@@ -144,7 +149,7 @@ class Agent0:
         else:
             rate_depend = 1.0 * self.myknowledge.completed_jobs_depend / self.myknowledge.attempted_jobs_depend
 
-        ## Here put the new fuzzy evaluation function
+        ## We are not interested in the willingness of giving help in the single agent scenario
         accept = True
 
         self.log.write_log_file(self.log.stdout_log,
@@ -154,38 +159,35 @@ class Agent0:
             self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] adapted\n')
             ## Take plan-request out of queue, and put the tasks into the queue for tasks the agent has committed to
             plan = self.myknowledge.plan_pending_eval.get()
-            self.log.write_log_file(self.log.stdout_log,
-                                    '[adapt ' + str(self.simulation.interact) + '] ' + str(plan) + '\n\n')
+            #self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] ' + str(plan) + '\n\n')
 
             for x in plan:
                 self.log.write_log_file(self.log.stdout_log,
                                         '[adapt ' + str(self.simulation.interact) + '] ' + str(x) + '\n')
                 self.myknowledge.task_queue.put(x)
-            self.log.write_log_file(self.log.stdout_log,
-                                    '[adapt ' + str(self.simulation.interact) + '] put tasks in queue\n')
 
-            self.myknowledge.count_posReq = self.myknowledge.count_posReq + 1
+            self.myknowledge.count_posReq += 1
 
-            self.myknowledge.attempted_jobs = self.myknowledge.attempted_jobs + 1
+            self.myknowledge.attempted_jobs += 1
 
             self.mycore.state = 2
             # self.myknowledge.service = self.services[self.myknowledge.task_idx]
-
             self.myknowledge.helping = True
+
             self.log.write_log_file(self.log.stdout_log,
-                                    '[adapt ' + str(self.simulation.interact) + '] helping: ' + str(
-                                        self.myknowledge.helping) + '\n')
+                                    '[adapt ' + str(self.simulation.interact) + '] helping: '
+                                    + str(self.myknowledge.helping) + '\n')
 
         else:
             print 'keep at what you\'re doing'
-            self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] do not adapt\n')
+            self.log.write_log_file(self.log.stdout_log, '[adapt ' + str(self.simulation.interact) + '] do not adapt - should not enter in this code\n')
             self.mycore.state = self.myknowledge.old_state
 
     def idle(self):
         print 'im in idle'
         self.simulation.idle = self.simulation.inc_iterationstamps(self.simulation.idle)
-        self.log.write_log_file(self.log.stdout_log, '[fsm ' + str(self.simulation.idle) + ']\n')
-        self.generate_goal()
+        self.log.write_log_file(self.log.stdout_log, '[idle ' + str(self.simulation.idle) + ']\n')
+        # self.generate_goal()
         self.commit2goal()
 
     def interact(self):
@@ -243,6 +245,8 @@ class Agent0:
                 ## Detect task difficulty - from nr of required abilities
                 self.myknowledge.difficulty = self.simulation.detect_difficulty(self.myknowledge.service)
 
+                self.simulation.no_tasks_attempted[self.myknowledge.difficulty] += 1
+
                 self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']' + str(
                     self.myknowledge.service) + '\n')
                 self.log.write_log_file(self.log.stdout_log, '[execute ' + str(self.simulation.execute) + ']' + str(
@@ -294,23 +298,22 @@ class Agent0:
 
     ##Instead of iteration, pause for some prespecified time
     def execute_step_v3(self):
-        dependencies_abil, dependencies_res, req_missing = self.simulation.sim_dependencies(self.myknowledge.service)
+        dependencies_abil, dependencies_res, req_missing, task_importance, task_urgency, culture, best = self.simulation.sim_dependencies(self.myknowledge.service)
 
         self.log.write_log_file(self.log.stdout_log,
                                 '[run_step ' + str(self.simulation.execute) + '] fuzzy inputs: %f, %f, health: %f\n' % (
                                 dependencies_abil, dependencies_res, sum([self.mycore.sensmot, self.mycore.battery])))
 
         start_time = timeit.default_timer()
-        depend = self.mycore.ask_4help(sum([self.mycore.sensmot, self.mycore.battery]), dependencies_abil,
-                                             dependencies_res,  0.5, 0.5, 0.5,
-                                             0.5, 0.5)
+        depend, theta = self.mycore.ask_4help(sum([self.mycore.sensmot, self.mycore.battery]), dependencies_abil,
+                                             dependencies_res,  self.mycore.self_esteem, task_urgency, task_importance,
+                                             culture, best)
         # depend_fuzzy = self.mycore.willing2ask_fuzzy(
         #     [sum([self.mycore.sensmot, self.mycore.battery]), 0.7, dependencies, 0.5])
         self.simulation.fuzzy_time.append(timeit.default_timer() - start_time)
 
-        self.log.write_log_file(self.log.stdout_log,
-                                '[run_step ' + str(self.simulation.execute) + '] depend_fuzzy: ' + str(
-                                    depend) + '\n')
+        self.log.write_log_file(self.log.stdout_log,'[run_step ' + str(self.simulation.execute) + '] depend_fuzzy: '
+                                + str(depend) + '\n')
 
         if req_missing and not depend:
             self.simulation.required_missing_noreq = self.simulation.required_missing_noreq + 1
@@ -319,6 +322,7 @@ class Agent0:
                 self.simulation.required_missing_noreq / float(self.simulation.required_missing)) + '\n')
 
         if depend:
+            self.simulation.no_tasks_depend_attempted[self.myknowledge.difficulty] += 1
             self.simulation.requests[self.myknowledge.difficulty] = self.simulation.requests[
                                                                         self.myknowledge.difficulty] + 1
             exec_time = self.simulation.additional_delay[self.myknowledge.difficulty] + self.simulation.delay[
@@ -328,7 +332,7 @@ class Agent0:
                                     self.myknowledge.difficulty, self.simulation.delay[self.myknowledge.difficulty],
                                     self.simulation.additional_delay[self.myknowledge.difficulty]))
             self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(
-                self.simulation.execute) + '] Ask for help\n ...Wait for %f' % exec_time)
+                self.simulation.execute) + '] Ask for help\n ...Wait for %f\n' % exec_time)
             self.simulation.exec_times[self.myknowledge.difficulty] = self.simulation.exec_times[
                                                                           self.myknowledge.difficulty] + exec_time
             time.sleep(exec_time)
@@ -336,10 +340,13 @@ class Agent0:
             self.myknowledge.iteration = -1
             # Assume that less energy is consumed when asking for help -- someone else is doing the deed
             self.mycore.battery_change(0.2 * int(self.myknowledge.service['energy']))
+
+            self.simulation.no_tasks_depend_completed[self.myknowledge.difficulty] += 1
+
         else:
             exec_time = self.simulation.delay[self.myknowledge.difficulty]
             self.log.write_log_file(self.log.stdout_log, '[run_step ' + str(
-                self.simulation.execute) + '] Do it yourself\n ...Wait for %f' % exec_time)
+                self.simulation.execute) + '] Do it yourself\n ...Wait for %f\n' % exec_time)
             self.simulation.exec_times[self.myknowledge.difficulty] = self.simulation.exec_times[
                                                                           self.myknowledge.difficulty] + exec_time
 
@@ -352,6 +359,33 @@ class Agent0:
             self.myknowledge.iteration = -1
             # diminish by the energy required by the task
             self.mycore.battery_change(int(self.myknowledge.service['energy']))
+            self.simulation.no_tasks_completed[self.myknowledge.difficulty] += 1
+
+        if (sum(self.simulation.no_tasks_attempted) - sum(self.simulation.no_tasks_depend_attempted)) == 0:
+            self.mycore.self_esteem = 0.0
+        else:
+            self.mycore.self_esteem = (sum(self.simulation.no_tasks_completed) - sum(self.simulation.no_tasks_depend_completed))\
+                                  / float(sum(self.simulation.no_tasks_attempted) - sum(self.simulation.no_tasks_depend_attempted))
+
+        # Record
+        self.simulation.esteem.append(self.mycore.self_esteem)
+        self.simulation.tu.append(task_urgency)
+        self.simulation.ti.append(task_importance)
+        self.simulation.culture.append(culture)
+        self.simulation.candidate.append(best)
+        self.simulation.theta.append(theta)
+        if req_missing:
+            self.simulation.deps.append(1)
+        else:
+            self.simulation.deps.append(0)
+        self.simulation.health.append(sum([self.mycore.sensmot, self.mycore.battery]))
+        self.simulation.theta_bool.append(depend)
+        # Inc to reach stop of simulation
+        if not self.myknowledge.service['senderID'] == self.mycore.ID:
+            self.simulation.stopINC += 1
+            print 'STOP INC: %d' % self.simulation.stopINC
+
+        self.log.write_log_file(self.log.stdout_log,'[run_step ' + str(self.simulation.execute) + '] STOP INC: %d\n' % self.simulation.stopINC)
 
     def regenerate(self):
         print 'im in regenerate'
@@ -624,7 +658,7 @@ class Agent0:
 
     def publish2sensormotor(self, raw_content):
         if not rospy.is_shutdown():
-            print rospy.get_name()
+            #print rospy.get_name()
             self.publish_bcast[0].publish(self.mycore.create_message(raw_content, ''))
         else:
             print 'rospy is shutdown'

@@ -326,14 +326,87 @@ if __name__ == '__main__':
         # pdb.set_trace()
         results_filename = '/home/mfi01/catkin_ws/results/test/pop_size.' + str(popSize) + '/prova.' + str(
             provaNr) + '/results_' + str(agent_id) + '_' + str(delta) + '_' + str(depends)
-        agent.log.write_log_file(results_filename, str(agent.simulation.fuzzy_time) + '\n' +
-                                 'req_easy    req_medium  req_hard    complTIme_easy  complT_medium   complT_hard '
-                                 + '\n' + str(agent.simulation.requests[0]) + ' ' + str(agent.simulation.requests[1])
-                                 + '    ' + str(agent.simulation.requests[2]) + '   ' + str(agent.simulation.exec_times[0])
-                                 + '    ' + str(agent.simulation.exec_times[1]) + ' ' + str(agent.simulation.exec_times[2]) + '\n'
-                                 + 'No requests when it should have been' + '\n'
-                                 + str(agent.simulation.required_missing_noreq) + '\n'
-                                 + str(agent.mycore.factor_track))
+
+        # Write out times it takes for the logic to return
+        for x in agent.simulation.fuzzy_time:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+
+        # reqE      reqM        reqH        timeE       timeM       timeH
+
+        agent.log.write_log_file(results_filename, str(agent.simulation.requests[0]) + '         ' + str(agent.simulation.requests[1])
+                                 + '            ' + str(agent.simulation.requests[2]) + '       ' + str(agent.simulation.exec_times[0])
+                                 + '        ' + str(agent.simulation.exec_times[1]) + '         ' + str(agent.simulation.exec_times[2]) + '\n'
+                                 + str(agent.simulation.required_missing_noreq) + '\n')
+
+        # Factor track
+        for x in agent.mycore.factor_track:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Jobs attempted
+        agent.log.write_log_file(results_filename, '%d\n' % agent.myknowledge.attempted_jobs)
+
+        # TA  TDA TC  TDC
+        for x in agent.simulation.no_tasks_attempted:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+        for x in agent.simulation.no_tasks_depend_attempted:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+        for x in agent.simulation.no_tasks_completed:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+        for x in agent.simulation.no_tasks_depend_completed:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+
+        # Theta
+        for x in agent.simulation.theta:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Esteem
+        for x in agent.simulation.esteem:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Task urgency
+        for x in agent.simulation.tu:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Task importance
+        for x in agent.simulation.ti:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Culture
+        for x in agent.simulation.culture:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Candidate
+        for x in agent.simulation.candidate:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Dependencies (required)
+        for x in agent.simulation.deps:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Health
+        for x in agent.simulation.health:
+            agent.log.write_log_file(results_filename, str(x) + ' ')
+
+        agent.log.write_log_file(results_filename, '\n')
+        # Theta_bool
+        for x in agent.simulation.theta_bool:
+            if x:
+                agent.log.write_log_file(results_filename, str(1) + ' ')
+            else:
+                agent.log.write_log_file(results_filename, str(0) + ' ')
+
         sys.stderr = orig_stderr
         f.close()
         sys.stdout = orig_stdout
